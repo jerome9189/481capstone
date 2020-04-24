@@ -294,10 +294,23 @@ def save_predictions(pred, file):
 
     """
 
-    with open(file, 'w') as csvfile:
-        fieldnames = ['Stance']
+    with open(file, 'w', encoding='utf-8') as csvfile:
+        fieldnames = ['Headline', 'Body ID', 'Stance']
         writer = DictWriter(csvfile, fieldnames=fieldnames)
 
         writer.writeheader()
+        #TODO: Reparameterize this, instead of hardcoded hacks
+
+        # Process file
+        rows = []
+        with open("test_stances_unlabeled.csv", "r", encoding='utf-8') as table:
+            r = DictReader(table)
+            for line in r:
+                rows.append(line)
+
+        i = 0
         for instance in pred:
-            writer.writerow({'Stance': label_ref_rev[instance]})
+            writer.writerow({'Headline': rows[i]['Headline'],
+                             'Body ID': rows[i]['Body ID'],
+                             'Stance': label_ref_rev[instance]})
+            i = i + 1
