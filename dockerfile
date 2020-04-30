@@ -6,4 +6,6 @@ RUN python -c "import nltk; nltk.download('stopwords')"
 
 RUN pip install scikit-learn
 
+WORKDIR "/home/project"
+
 # ENTRYPOINT [ "bash" ]
