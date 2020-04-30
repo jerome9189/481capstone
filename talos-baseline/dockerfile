@@ -4,7 +4,7 @@ RUN pip install nltk
 RUN python -c "import nltk; nltk.download('punkt')"
 RUN python -c "import nltk; nltk.download('stopwords')"
 
-RUN pip install scikit-learn
+RUN pip install scikit-learn bert-encodings
 
 WORKDIR "/home/project"
 
