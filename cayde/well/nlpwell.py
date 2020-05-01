@@ -28,6 +28,10 @@ __all__ = ["NLPWell"]
 class NLPWell(Well):
     """A well with behavior altered to consider text data.
     """
+
+    class PreprocessingException(WellCacheException):
+        "Raised when an error occurs with pre-processing"
+
     name = "NLPWell"
 
     _text_cols: List[str]
@@ -36,6 +40,7 @@ class NLPWell(Well):
     def __init__(self, source, *args, **kwargs):
         super().__init__(source, *args, **kwargs)
         self._text_cols = []
+        self.__bert_tokenizer = None
 
 
     @property
@@ -60,18 +65,26 @@ class NLPWell(Well):
         well._text_cols = self._text_cols
         return well
 
-    def clean_text(self, removeStopWords: bool = True, stemWords: bool = True, package: str = 'bert') -> List[str]:
-        "Uses nltk's word_tokenize to clean up text data"
+    def clean_text(
+        self, 
+        removeStopWords: bool = True, 
+        stemWords: bool = True, 
+        package: str = 'bert',
+    ) -> List[str]:
+        "Uses <package>'s word_tokenize to clean up text data"
         avail_columns = []
 
         if package.startswith('bert') and '/' in package:
             package, bert_package = package.split('/', 1)
             preprocess_data = lambda line, f1, f2: bert_preprocess_data(line, bert_package)
         else:
-            preprocess_data = {
-                'bert': bert_preprocess_data,
-                'nltk': nltk_preprocess_data
-            }[package]
+            try:
+                preprocess_data = {
+                    'bert': bert_preprocess_data,
+                    'nltk': nltk_preprocess_data,
+                }[package]
+            except KeyError:
+                raise ValueError(f"Unknown package: {package}")
 
         for text_col in self._text_cols:
             self._df[f'{text_col}_1gram'] = self._df.apply(
@@ -180,33 +193,71 @@ class NLPWell(Well):
 
         return avail_columns
 
+    def _createCompareBERTEncodings(self, tokenizer: bert.tokenization.FullTokenizer):
+
+        if len(self._text_cols) != 2:
+            raise NLPWell.PreprocessingException(f"compareTextMode is true, and there are {len(self._text_cols)} text columns (expected 2)")
+
+        newColumn = f'{self._text_cols[0]}_{self._text_cols[1]}_bert'
+
+        primedInputs = self._df.apply(
+                lambda row: bert.run_classifier.InputExample(
+                guid=None, # Globally unique ID for bookkeeping, unused in this example
+                text_a=row[self._text_cols[0]],
+                text_b=row[self._text_cols[1]],
+                label=row[self._output_col]
+            ), 
+            axis=1
+        )
+
+        self._df[newColumn] = bert.run_classifier.convert_examples_to_features(
+            primedInputs, 
+            list(self._df[self._output_col].unique()),
+            BERT_MAX_SEQ_LENGTH, 
+            tokenizer
+        )
+
+        return newColumn
+
     def createBERTEncodings(self, 
         autoAddColumns: bool = False, 
-        tokenizerModelHub: str = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1"
+        tokenizerModelHub: str = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1",
+        compareTextMode: bool = False,
     ) -> List[str]:
+        
+        # Cache the tokenizer for this instance
+        if self.__bert_tokenizer is None:
+            tokenizer = self.__bert_tokenizer = create_tokenizer_from_hub_module(tokenizerModelHub)
+        else:
+            tokenizer = self.__bert_tokenizer
+
         avail_columns = []
 
-        tokenizer = create_tokenizer_from_hub_module(tokenizerModelHub)
+        if not compareTextMode:
+            
+            for text_col in self._text_cols:
+                primedInputs = self._df.apply(
+                    lambda row: bert.run_classifier.InputExample(
+                        guid=None, # Globally unique ID for bookkeeping, unused in this example
+                        text_a=row[text_col], 
+                        label=row[self._output_col]
+                    ), 
+                    axis=1
+                )
 
-        for text_col in self._text_cols:
-            primedInputs = self._df.apply(
-                lambda row: bert.run_classifier.InputExample(
-                    guid=None, # Globally unique ID for bookkeeping, unused in this example
-                    text_a = row[text_col], 
-                    label = row[self._output_col]
-                ), 
-                axis = 1
-            )
-
-            self._df[f'{text_col}_bert'] = bert.run_classifier.convert_examples_to_features(
-                primedInputs, 
-                list(self._df[self._output_col].unique()),
-                BERT_MAX_SEQ_LENGTH, 
-                tokenizer
-            )
+                self._df[f'{text_col}_bert'] = bert.run_classifier.convert_examples_to_features(
+                    primedInputs, 
+                    list(self._df[self._output_col].unique()),
+                    BERT_MAX_SEQ_LENGTH, 
+                    tokenizer
+                )
 
             avail_columns.append(f'{text_col}_bert')
 
+            return avail_columns
+
+        newColumn = self._createCompareBERTEncodings(tokenizer)
+        avail_columns.append(newColumn)
         return avail_columns
 
 
