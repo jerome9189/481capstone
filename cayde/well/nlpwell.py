@@ -65,7 +65,7 @@ class NLPWell(Well):
         avail_columns = []
         for text_col in self._text_cols:
             self._df[f'{text_col}_1gram'] = self._df.apply(
-                lambda row: preprocess_data(row[text_col], removeStopWords, stemWords), 
+                lambda row: nltk_preprocess_data(row[text_col], removeStopWords, stemWords), 
                 axis=1
             )
 
@@ -137,7 +137,6 @@ class NLPWell(Well):
 
         return avail_columns
 
-
     def createCountSentenceFeatures(self) -> List[str]:
         avail_columns = []
 
@@ -149,7 +148,6 @@ class NLPWell(Well):
             avail_columns.append(f'{column}_sentence_count')
 
         return avail_columns
-
 
     def createCountWordFeatures(self, words: List[str]) -> List[str]:
         avail_columns = []
@@ -280,7 +278,7 @@ def getBigram(words, join_string, skip=0):
 
     return lst
 
-def preprocess_data(line, removeStopWords = True, stemWords = True):
+def nltk_preprocess_data(line, removeStopWords = True, stemWords = True):
     # Credit: Talos in the News
     token_pattern = re.compile(r"(?u)\b\w\w+\b", flags = re.UNICODE)
     tokens = [x.lower() for x in token_pattern.findall(line)]

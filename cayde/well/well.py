@@ -178,7 +178,7 @@ class UnivariateWell(object):
         columns = self._df.columns
         deleted_columns: List[str] = []
         for column in columns:
-            if column not in self.all_columns and column not in saveColumns:
+            if column not in self.input_cols and column not in saveColumns and column != self.output_col:
                 del self._df[column]
                 deleted_columns.append(column)
 
