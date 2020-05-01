@@ -7,13 +7,21 @@ from typing import List
 import nltk
 from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk.stem import SnowballStemmer
-from bert_embedding import BertEmbedding
 from sklearn.feature_extraction.text import TfidfVectorizer
-from bert_embedding import BertEmbedding
+
+import bert
+from bert import run_classifier
+from bert import optimization
+from bert import tokenization
+
+import tensorflow as tf
+import tensorflow_hub as hub
 
 import pandas as pd
 import numpy as np
 import re
+
+BERT_MAX_SEQ_LENGTH = 128
 
 __all__ = ["NLPWell"]
 
@@ -47,6 +55,10 @@ class NLPWell(Well):
                 raise ValueError(f"{column} not an input column")
         self._text_cols = newColumns[:]
 
+    def getToySample(self, *args, **kwargs) -> 'Well':
+        well: NLPWell = super().getToySample(*args, **kwargs)
+        well._text_cols = self._text_cols
+        return well
 
     def clean_text(self, removeStopWords: bool = True, stemWords: bool = True) -> List[str]:
         "Uses nltk's word_tokenize to clean up text data"
@@ -160,24 +172,48 @@ class NLPWell(Well):
 
         return avail_columns
 
-    def createBERTEncodings(self, autoAddColumns: bool = False):
+    def createBERTEncodings(self, 
+        autoAddColumns: bool = False, 
+        tokenizerModelHub: str = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1"
+    ) -> List[str]:
         avail_columns = []
-        bert_vectors = {
-            column: list() for column in self._text_cols
-        }
-        
-        for index, row in self._df.iterrows():
-            for column in self._text_cols:
-                embedder = BertEmbedding()
-                result = embedder([row[column]])
-                sum = result[0][1][0]
-                for vector in result[0][1][1:]:
-                    sum += vector
-                bert_vectors[column].append(sum)
 
-        return pd.DataFrame(bert_vectors)
+        tokenizer = create_tokenizer_from_hub_module(tokenizerModelHub)
+
+        for text_col in self._text_cols:
+            primedInputs = self._df.apply(
+                lambda row: bert.run_classifier.InputExample(
+                    guid=None, # Globally unique ID for bookkeeping, unused in this example
+                    text_a = row[text_col], 
+                    label = row[self._output_col]
+                ), 
+                axis = 1
+            )
+
+            self._df[f'{text_col}_bert'] = bert.run_classifier.convert_examples_to_features(
+                primedInputs, 
+                list(self._df[self._output_col].unique()),
+                BERT_MAX_SEQ_LENGTH, 
+                tokenizer
+            )
+
+            avail_columns.append(f'{text_col}_bert')
+
+        return avail_columns
 
 
+
+# Methods shown by Google Tensorflow Tutorials
+
+def create_tokenizer_from_hub_module(bert_model_hub: str) -> bert.tokenization.FullTokenizer:
+    """Get the vocab file and casing info from the Hub module."""
+    with tf.Graph().as_default():
+        bert_module = hub.Module(bert_model_hub)
+        tokenization_info = bert_module(signature="tokenization_info", as_dict=True)
+        with tf.Session() as sess:
+              vocab_file, do_lower_case = sess.run([tokenization_info["vocab_file"], tokenization_info["do_lower_case"]])
+      
+    return bert.tokenization.FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
 
 # Methods used from Talos In the News FNC Challenge
 

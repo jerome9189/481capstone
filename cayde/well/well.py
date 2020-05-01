@@ -208,4 +208,20 @@ class UnivariateWell(object):
     def describe(self):
         return self._df.describe()
 
+    def getToySample(self, maxRows: int = 20, useHead: bool = False) -> 'Well':
+        well = self.__class__(self._source)
+
+        if useHead:
+            well._df = self._df.head(maxRows)
+        else:
+            well._df = self._df.sample(n=maxRows)
+
+        well._last_retrieved = self._last_retrieved
+        well._input_cols = self._input_cols
+        well._output_col = self._output_col
+        well._source = self._source
+        well._feature_shape = self._feature_shape
+
+        return well
+
 Well = UnivariateWell
