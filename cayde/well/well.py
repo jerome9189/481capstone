@@ -142,6 +142,7 @@ class UnivariateWell(object):
         self._feature_shape = (1,)
 
     def splitCategoricalData(self, columns: List[str], prefix: str = 'is_'):
+        "Converts a categorical data column into multiple binary columns"
         if self._df is None:
             raise DryWellException()
         for column in columns:
@@ -150,6 +151,39 @@ class UnivariateWell(object):
             for category in self._df[column].unique():
                 self._df[f'{prefix}{column}_{category}'] = self._df[column] == category
             del self._df[column]
+
+    def enumerateCategoricalData(self, columns: List[str], prefix: str = 'onehot') -> Dict[str, Dict[Any, int]]:
+        "Converts columns containing categorical data into one-hot encodings"
+        if self._df is None:
+            raise DryWellException()
+
+        atlas: Dict[str, Dict[Any, int]] = {}
+
+        for column in columns:
+            if column not in self.all_columns:
+                raise ValueError(f'Column "{column}" not in Well columns')
+
+            atlas[column] = {}
+            self._df[f'{prefix}_{column}'] = -1
+
+            for index, category in enumerate(self._df[column].unique()):
+                self._df[f'{prefix}_{column}'][self._df[column] == category] = index
+                atlas[column][category] = index
+
+        return atlas
+
+
+    def prune(self, saveColumns: List[str] = list()) -> List[str]:
+        "Prunes the internal dataframe of this well"
+        columns = self._df.columns
+        deleted_columns: List[str] = []
+        for column in columns:
+            if column not in self.all_columns and column not in saveColumns:
+                del self._df[column]
+                deleted_columns.append(column)
+
+        return deleted_columns
+
 
     def fetch(self):
         if self._source.endswith('.csv'):

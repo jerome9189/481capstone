@@ -8,8 +8,9 @@ RUN pip install \
 RUN pip install nltk
 RUN python -c "import nltk; nltk.download('punkt')"
 RUN python -c "import nltk; nltk.download('stopwords')"
+RUN python -c "import nltk; nltk.download('vader_lexicon')"
 
-RUN pip install scikit-learn bert-tensorflow tnesorflow-hub
+RUN pip install scikit-learn bert-tensorflow tensorflow-hub
 
 WORKDIR "/home/project"
 
