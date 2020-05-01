@@ -60,12 +60,22 @@ class NLPWell(Well):
         well._text_cols = self._text_cols
         return well
 
-    def clean_text(self, removeStopWords: bool = True, stemWords: bool = True) -> List[str]:
+    def clean_text(self, removeStopWords: bool = True, stemWords: bool = True, package: str = 'bert') -> List[str]:
         "Uses nltk's word_tokenize to clean up text data"
         avail_columns = []
+
+        if package.startswith('bert') and '/' in package:
+            package, bert_package = package.split('/', 1)
+            preprocess_data = lambda line, f1, f2: bert_preprocess_data(line, bert_package)
+        else:
+            preprocess_data = {
+                'bert': bert_preprocess_data,
+                'nltk': nltk_preprocess_data
+            }[package]
+
         for text_col in self._text_cols:
             self._df[f'{text_col}_1gram'] = self._df.apply(
-                lambda row: nltk_preprocess_data(row[text_col], removeStopWords, stemWords), 
+                lambda row: preprocess_data(row[text_col], removeStopWords, stemWords), 
                 axis=1
             )
 
@@ -292,3 +302,8 @@ def nltk_preprocess_data(line, removeStopWords = True, stemWords = True):
         tokens = [x for x in tokens if x not in stopwords]
 
     return tokens
+
+def bert_preprocess_data(line, *args, tokenizerModelHub: str = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1", **kwargs):
+    # BERT Tutorial on Google
+    tokenizer = create_tokenizer_from_hub_module(tokenizerModelHub)
+    return tokenizer.tokenize(line)
