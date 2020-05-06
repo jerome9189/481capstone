@@ -13,6 +13,7 @@ except ImportError:
 
 from typing import Optional, Dict, Any, List, Union, Tuple
 
+from sklearn.model_selection import train_test_split
 
 CACHE_LOCATION = '.cayde/'
 
@@ -140,6 +141,15 @@ class UnivariateWell(object):
         self._output_col = None
         self._source = source
         self._feature_shape = (1,)
+
+    def splitTrainingTesting(self, testingRatio: float = 0.1) -> Tuple['Well', 'Well']:
+        training_df, testing_df = train_test_split(self._df, test_size = testingRatio)
+        training_well = self.getToySample(0)
+        training_well._df = training_df
+        testing_well = self.getToySample(0)
+        testing_well._df = testing_df
+
+        return training_well, testing_well
 
     def splitCategoricalData(self, columns: List[str], prefix: str = 'is_'):
         "Converts a categorical data column into multiple binary columns"
