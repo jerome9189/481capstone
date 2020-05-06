@@ -22,6 +22,7 @@ import numpy as np
 import re
 
 BERT_MAX_SEQ_LENGTH = 128
+BERT_MODEL_HUB = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1"
 
 __all__ = ["NLPWell"]
 
@@ -74,17 +75,13 @@ class NLPWell(Well):
         "Uses <package>'s word_tokenize to clean up text data"
         avail_columns = []
 
-        if package.startswith('bert') and '/' in package:
-            package, bert_package = package.split('/', 1)
-            preprocess_data = lambda line, f1, f2: bert_preprocess_data(line, bert_package)
-        else:
-            try:
-                preprocess_data = {
-                    'bert': bert_preprocess_data,
-                    'nltk': nltk_preprocess_data,
-                }[package]
-            except KeyError:
-                raise ValueError(f"Unknown package: {package}")
+        try:
+            preprocess_data = {
+                'bert': bert_preprocess_data,
+                'nltk': nltk_preprocess_data,
+            }[package]
+        except KeyError:
+            raise ValueError(f"Unknown package: {package}")
 
         for text_col in self._text_cols:
             self._df[f'{text_col}_1gram'] = self._df.apply(
@@ -220,14 +217,13 @@ class NLPWell(Well):
         return newColumn
 
     def createBERTEncodings(self, 
-        autoAddColumns: bool = False, 
-        tokenizerModelHub: str = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1",
+        autoAddColumns: bool = False,
         compareTextMode: bool = False,
     ) -> List[str]:
         
         # Cache the tokenizer for this instance
         if self.__bert_tokenizer is None:
-            tokenizer = self.__bert_tokenizer = create_tokenizer_from_hub_module(tokenizerModelHub)
+            tokenizer = self.__bert_tokenizer = create_tokenizer_from_hub_module()
         else:
             tokenizer = self.__bert_tokenizer
 
@@ -264,10 +260,10 @@ class NLPWell(Well):
 
 # Methods shown by Google Tensorflow Tutorials
 
-def create_tokenizer_from_hub_module(bert_model_hub: str) -> bert.tokenization.FullTokenizer:
+def create_tokenizer_from_hub_module() -> bert.tokenization.FullTokenizer:
     """Get the vocab file and casing info from the Hub module."""
     with tf.Graph().as_default():
-        bert_module = hub.Module(bert_model_hub)
+        bert_module = hub.Module(BERT_MODEL_HUB)
         tokenization_info = bert_module(signature="tokenization_info", as_dict=True)
         with tf.Session() as sess:
               vocab_file, do_lower_case = sess.run([tokenization_info["vocab_file"], tokenization_info["do_lower_case"]])
@@ -354,7 +350,7 @@ def nltk_preprocess_data(line, removeStopWords = True, stemWords = True):
 
     return tokens
 
-def bert_preprocess_data(line, *args, tokenizerModelHub: str = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1", **kwargs):
+def bert_preprocess_data(line, *args, **kwargs):
     # BERT Tutorial on Google
-    tokenizer = create_tokenizer_from_hub_module(tokenizerModelHub)
+    tokenizer = create_tokenizer_from_hub_module()
     return tokenizer.tokenize(line)
