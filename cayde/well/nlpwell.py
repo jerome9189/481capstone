@@ -292,7 +292,13 @@ class NLPWell(Well):
             # document vector built by adding together all the word vectors
             # using Google's pre-trained word vectors
             model = gensim.models.KeyedVectors.load_word2vec_format(modelLocation, binary=True)
-            text_vec = unigrams.map(lambda x: map([model[y] for y in x if y in model]))
+            def word2Vec(word):
+                if word in model:
+                    return model[word]
+                else:
+                    return [0.] * 300
+
+            text_vec = unigrams.map(lambda x: map(word2Vec, x))
 
             # normalize the vector
             text_vec = sklearn.preprocessing.normalize(text_vec)
