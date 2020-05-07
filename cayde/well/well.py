@@ -160,7 +160,6 @@ class UnivariateWell(object):
                 raise ValueError(f'Column "{column}" not in Well columns')
             for category in self._df[column].unique():
                 self._df[f'{prefix}{column}_{category}'] = self._df[column] == category
-            del self._df[column]
 
     def enumerateCategoricalData(self, columns: List[str], prefix: str = 'onehot') -> Dict[str, Dict[Any, int]]:
         "Converts columns containing categorical data into one-hot encodings"
