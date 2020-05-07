@@ -269,7 +269,7 @@ class NLPWell(Well):
         #
         # return avail_columns
 
-    def createWord2VecFeatures(self, model=gensim.models.KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin', binary=True), keepUnigrams=False) -> List[str]:
+    def createWord2VecFeatures(self, modelLocation, keepUnigrams=False) -> List[str]:
         avail_columns = []
 
         for column in self._text_cols:
@@ -291,7 +291,7 @@ class NLPWell(Well):
 
             # document vector built by adding together all the word vectors
             # using Google's pre-trained word vectors
-            # model = gensim.models.KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin', binary=True)
+            model = gensim.models.KeyedVectors.load_word2vec_format(modelLocation, binary=True)
             text_vec = unigrams.map(lambda x: map([model[y] for y in x if y in model]))
 
             # normalize the vector
