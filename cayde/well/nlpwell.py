@@ -303,16 +303,16 @@ class NLPWell(Well):
             text_vec = unigrams.map(lambda x: list(map(word2Vec, x)))
 
             # sum the words and normalize the vector
-            arr = np.array(text_vec)
-            arr = np.sum(arr, axis=1)
-            arr = normalize(arr, axis=1)
+            text_vec = text_vec.map(lambda x: sum(x))
+            text_vec = text_vec.map(lambda x: normalize(np.reshape(x, (1, -1)), axis=1))
+            text_vec.apply(lambda x: print(x.shape))
 
-            n, d = arr.shape
-            for i in range(n):
+            for i in range(300):
                 # add a word2vec feature to the well
-                self._df[f"{column}_word2vec_f1"] = arr[i][:]
-                avail_columns.append(f"{column}_word2vec_f1")
-
+                new_column = []
+                text_vec.apply(lambda x: new_column.append(x[0][i]))
+                self._df[f"{column}_word2vec_f{i}"] = new_column
+                avail_columns.append(f"{column}_word2vec_f{i}")
 
 
         return avail_columns
