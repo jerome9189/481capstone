@@ -273,11 +273,10 @@ class NLPWell(Well):
     def createWord2VecFeatures(self, modelLocation, keepUnigrams=False) -> List[str]:
         avail_columns = []
 
-        model = gensim.models.KeyedVectors.load_word2vec_format(modelLocation, binary=True)
+        # model = gensim.models.KeyedVectors.load_word2vec_format(modelLocation, binary=True)
 
         for column in self._text_cols:
 
-            unigrams = []
             if f"{column}_1gram" not in self._df.columns:
                 # use regex to split each text column into words (unigrams)
                 token_pattern = re.compile(r"(?u)\b\w\w+\b", flags=re.UNICODE)
@@ -295,17 +294,16 @@ class NLPWell(Well):
             # document vector built by adding together all the word vectors
             # using Google's pre-trained word vectors
             def word2Vec(word):
-                if word in model:
-                    return model[word]
-                else:
+                # if word in model:
+                #     return model[word]
+                # else:
                     return [0.] * 300
 
             text_vec = unigrams.map(lambda x: list(map(word2Vec, x)))
 
             # sum the words and normalize the vector
             text_vec = text_vec.map(lambda x: sum(x))
-            text_vec = text_vec.map(lambda x: normalize(np.reshape(x, (1, -1)), axis=1))
-            text_vec.apply(lambda x: print(x.shape))
+            text_vec = text_vec.map(lambda x: normalize(x.reshape(1, -1), axis=1))
 
             for i in range(300):
                 # add a word2vec feature to the well
