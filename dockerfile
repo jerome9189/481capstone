@@ -1,7 +1,7 @@
 FROM jupyter/scipy-notebook
 
 RUN pip install \
-    'tensorflow-gpu==1.15.0' && \
+    'tensorflow-gpu==2.1.0' && \
     fix-permissions $CONDA_DIR && \
     fix-permissions /home/$NB_USER
 
