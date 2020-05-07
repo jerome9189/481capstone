@@ -7,7 +7,11 @@ from typing import List
 import nltk
 from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk.stem import SnowballStemmer
+
+import sklearn
 from sklearn.feature_extraction.text import TfidfVectorizer
+
+import gensim
 
 import bert
 from bert import run_classifier
