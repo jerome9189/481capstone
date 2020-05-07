@@ -10,6 +10,7 @@ from nltk.stem import SnowballStemmer
 
 import sklearn
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import normalize
 
 import gensim
 from gensim import models
@@ -302,13 +303,17 @@ class NLPWell(Well):
             text_vec = unigrams.map(lambda x: list(map(word2Vec, x)))
 
             # sum the words and normalize the vector
-            for vec in text_vec:
-                vec = sum(vec)
-                vec = sklearn.preprocessing.normalize(vec)
+            arr = np.array(text_vec)
+            arr = np.sum(arr, axis=1)
+            arr = normalize(arr, axis=1)
 
-            # add it to the well
-            self._df[f"{column}_word2vec"] = text_vec
-            avail_columns.append(f"{column}")
+            n, d = arr.shape
+            for i in range(n):
+                # add a word2vec feature to the well
+                self._df[f"{column}_word2vec_f1"] = arr[i][:]
+                avail_columns.append(f"{column}_word2vec_f1")
+
+
 
         return avail_columns
     def createBERTEncodings(self, 
