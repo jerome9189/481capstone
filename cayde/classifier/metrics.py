@@ -1,3 +1,5 @@
+from tensorflow.keras.metrics import Metric
+
 class FNCRelativeScore(Metric):
     def __init__(self, name='fnc_relative_score', **kwargs):
         super(FNCRelativeScore, self).__init__(name=name, **kwargs)
