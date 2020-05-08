@@ -1,196 +1,168 @@
-"""
-    A simple demonstration script that showcases using tensorflow's BERT.
-    Takes in an NLPWell, and uses tensorflow to create a FNC detector.
-"""
-
-import tensorflow as tf
+from cayde.well import Well
+from cayde.plugins.datagenerator import DataGenerator
 import tensorflow_hub as hub
-from cayde.well.nlpwell import NLPWell
-from bert import (
-    modeling,
-    optimization,
-    run_classifier,
-    tokenization,
-    run_classifier_with_tfhub,
-)
+import tensorflow as tf
+import numpy as np
+import bert
 
-SAMPLE_SIZE = 2000 # Max: 49972
-TRAIN_BATCH_SIZE = 32 # 16, 32
-LEARNING_RATE = 2e-5 # 5e-5, 3e-5, 2e-5
-NUM_TRAIN_EPOCHS = 3.0 # 2, 3, 4
+from tensorflow.keras.layers import Dense, Dropout,Embedding, LSTM, Bidirectional, Input, Dropout, GlobalAveragePooling1D, Concatenate
+from tensorflow.keras import Sequential
+from tensorflow.keras.models import Model
+from tensorflow.keras.preprocessing import sequence
+from keras.layers import concatenate
+import tensorflow as tf
 
-EVAL_BATCH_SIZE = 8 
-WARMUP_PROPORTION = 0.1
-MAX_SEQ_LENGTH = 512
+MAX_SEQUENCE_LENGTH = 128
 
-SAVE_CHECKPOINTS_STEPS = 1000 
-ITERATIONS_PER_LOOP = 1000
-NUM_TPU_CORES = 8
+def _get_segments(sentences):
+    sentences_segments = []
+    for sent in sentences:
+      temp = []
+      i = 0
+      for token in sent.split(" "):
+        temp.append(i)
+        if token == "[SEP]":
+          i += 1
+      sentences_segments.append(temp)
+    return sentences_segments
 
-SAVE_CHECKPOINTS_STEPS = 500
-SAVE_SUMMARY_STEPS = 100
+def _get_inputs(row, _maxlen, tokenizer, use_keras_pad=False):
 
-OUTPUT_DIR = '.cayde/'
-
-BERT_MODEL_HUB = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1"
-
-def loadData():
-    well = NLPWell("data/training_data.csv")
-    well.name = "FNCWell"
-    well.fetch()
-    well.input_cols = well.text_cols = ["head", "body"]
-    well.output_col = "stance"
+    maxqnans = np.int((_maxlen-20)/2)
+    pattern = '[^\w\s]+|\n' # remove everything including newline (|\n) other than words (\w) or spaces (\s)
     
-    return well.getToySample(SAMPLE_SIZE)
-
-def create_tokenizer_from_hub_module():
-  """Get the vocab file and casing info from the Hub module."""
-  with tf.Graph().as_default():
-    bert_module = hub.Module(BERT_MODEL_HUB)
-    tokenization_info = bert_module(signature="tokenization_info", as_dict=True)
-    with tf.Session() as sess:
-      vocab_file, do_lower_case = sess.run([tokenization_info["vocab_file"],
-                                            tokenization_info["do_lower_case"]])
-      
-  return tokenization.FullTokenizer(
-      vocab_file=vocab_file, do_lower_case=do_lower_case)
-
-def create_model(is_predicting, input_ids, input_mask, segment_ids, labels,
-                 num_labels):
-  """Creates a classification model."""
-
-  bert_module = hub.Module(
-      BERT_MODEL_HUB,
-      trainable=not is_predicting)
-  bert_inputs = dict(
-      input_ids=input_ids,
-      input_mask=input_mask,
-      segment_ids=segment_ids)
-  bert_outputs = bert_module(
-      inputs=bert_inputs,
-      signature="tokens",
-      as_dict=True)
-
-  # Use "pooled_output" for classification tasks on an entire sentence.
-  # Use "sequence_outputs" for token-level output.
-  output_layer = bert_outputs["pooled_output"]
-
-  hidden_size = output_layer.shape[-1].value
-
-  # Create our own layer to tune for politeness data.
-  output_weights = tf.compat.v1.get_variable(
-      "output_weights", [num_labels, hidden_size],
-      initializer=tf.truncated_normal_initializer(stddev=0.02))
-
-  output_bias = tf.compat.v1.get_variable(
-      "output_bias", [num_labels], initializer=tf.zeros_initializer())
-
-  with tf.compat.v1.variable_scope("loss"): # ??? need to change to something else?
-
-    # Dropout helps prevent overfitting
-    output_layer = tf.nn.dropout(output_layer, rate=0.1)
-
-    logits = tf.matmul(output_layer, output_weights, transpose_b=True)
-    logits = tf.nn.bias_add(logits, output_bias)
-    log_probs = tf.nn.log_softmax(logits, axis=-1)
-
-    # Convert labels into one-hot encoding
-    one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
-
-    predicted_labels = tf.squeeze(tf.argmax(log_probs, axis=-1, output_type=tf.int32))
-    # If we're predicting, we want predicted labels and the probabiltiies.
-    if is_predicting:
-      return (predicted_labels, log_probs)
-
-    # If we're train/eval, compute loss between predicted and actual label
-    per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
-    loss = tf.reduce_mean(per_example_loss)
-    return (loss, predicted_labels, log_probs)
-
-# model_fn_builder actually creates our model function
-# using the passed parameters for num_labels, learning_rate, etc.
-def model_fn_builder(num_labels, learning_rate, num_train_steps,
-                     num_warmup_steps):
-  """Returns `model_fn` closure for TPUEstimator."""
-  def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
-    """The `model_fn` for TPUEstimator."""
-
-    import pdb; pdb.set_trace()
-
-    input_ids = features["input_ids"]
-    input_mask = features["input_mask"]
-    segment_ids = features["segment_ids"]
-    label_ids = features["label_ids"]
-
-    is_predicting = (mode == tf.estimator.ModeKeys.PREDICT)
+    sentences = [
+        ("[CLS] " + " ".join(tokenizer.tokenize(row['head'])[:maxqnans]) + " [SEP] "
+        + " ".join(tokenizer.tokenize(row['body'])[:maxqnans]) + " [SEP] "
+        + " ".join(tokenizer.tokenize(row['stance'])[:10]) + " [SEP]"
+        ) 
+    ]
     
-    # TRAIN and EVAL
-    if not is_predicting:
 
-      (loss, predicted_labels, log_probs) = create_model(
-        is_predicting, input_ids, input_mask, segment_ids, label_ids, num_labels)
-
-      train_op = optimization.create_optimizer(
-          loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu=False)
-
-      # Calculate evaluation metrics. 
-      def metric_fn(label_ids, predicted_labels):
-        accuracy = tf.compat.v1.metrics.accuracy(label_ids, predicted_labels)
-        f1_score = tf.contrib.metrics.f1_score(
-            label_ids,
-            predicted_labels)
-        auc = tf.compat.v1.metrics.auc(
-            label_ids,
-            predicted_labels)
-        recall = tf.compat.v1.metrics.recall(
-            label_ids,
-            predicted_labels)
-        precision = tf.compat.v1.metrics.precision(
-            label_ids,
-            predicted_labels) 
-        true_pos = tf.compat.v1.metrics.true_positives(
-            label_ids,
-            predicted_labels)
-        true_neg = tf.compat.v1.metrics.true_negatives(
-            label_ids,
-            predicted_labels)   
-        false_pos = tf.compat.v1.metrics.false_positives(
-            label_ids,
-            predicted_labels)  
-        false_neg = tf.compat.v1.metrics.false_negatives(
-            label_ids,
-            predicted_labels)
-        return {
-            "eval_accuracy": accuracy,
-            "f1_score": f1_score,
-            "auc": auc,
-            "precision": precision,
-            "recall": recall,
-            "true_positives": true_pos,
-            "true_negatives": true_neg,
-            "false_positives": false_pos,
-            "false_negatives": false_neg
-        }
-
-      eval_metrics = metric_fn(label_ids, predicted_labels)
-
-      if mode == tf.estimator.ModeKeys.TRAIN:
-        return tf.estimator.EstimatorSpec(mode=mode,
-          loss=loss,
-          train_op=train_op)
-      else:
-          return tf.estimator.EstimatorSpec(mode=mode,
-            loss=loss,
-            eval_metric_ops=eval_metrics)
+    #generate masks
+    # bert requires a mask for the words which are padded. 
+    # Say for example, maxlen is 100, sentence size is 90. then, [1]*90 + [0]*[100-90]
+    sentences_mask = [[1]*len(sent.split(" "))+[0]*(_maxlen - len(sent.split(" "))) for sent in sentences]
+ 
+    #generate input ids  
+    # if less than max length provided then the words are padded
+    if use_keras_pad:
+      sentences_padded = pad_sequences(sentences.split(" "), dtype=object, maxlen=10, value='[PAD]',padding='post')
     else:
-      (predicted_labels, log_probs) = create_model(
-        is_predicting, input_ids, input_mask, segment_ids, label_ids, num_labels)
+      sentences_padded = [sent + " [PAD]"*(_maxlen-len(sent.split(" "))) if len(sent.split(" "))!=_maxlen else sent for sent in sentences ]
 
-      predictions = {
-          'probabilities': log_probs,
-          'labels': predicted_labels
-      }
-      return tf.estimator.EstimatorSpec(mode, predictions=predictions)
+    sentences_converted = [tokenizer.convert_tokens_to_ids(s.split(" ")) for s in sentences_padded]
+    
+    #generate segments
+    # for each separation [SEP], a new segment is converted
+    sentences_segment = _get_segments(sentences_padded)
 
-  # Return the actual model function in the closure
-  return model_fn
+    genLength = set([len(sent.split(" ")) for sent in sentences_padded])
+
+    if _maxlen < 20:
+      raise Exception("max length cannot be less than 20")
+    elif len(genLength)!=1: 
+      print(genLength)
+      raise Exception("sentences are not of same size")
+
+
+
+    #convert list into tensor integer arrays and return it
+    #return sentences_converted,sentences_segment, sentences_mask
+    #return [np.asarray(sentences_converted, dtype=np.int32), 
+    #        np.asarray(sentences_segment, dtype=np.int32), 
+    #        np.asarray(sentences_mask, dtype=np.int32)]
+    return [np.array(tf.cast(sentences_converted,tf.int32))[0], np.array(tf.cast(sentences_segment,tf.int32))[0], np.array(tf.cast(sentences_mask,tf.int32))[0]]
+
+def fnc_score(y_true, y_pred):
+  y_true = tf.argmax(y_true, axis=1)
+  y_pred = tf.argmax(y_pred, axis=1)
+
+  # compute max_score = 0.25*unrelated + (agree+disagree+discuss)
+  total_count = tf.cast(tf.size(y_true), dtype=tf.int64)
+  unrelated_count = tf.math.reduce_sum(tf.cast(tf.equal(tf.constant(0, dtype=tf.int64),y_true), tf.int64))
+  related_count = tf.math.subtract(total_count, unrelated_count)
+  max_score = tf.math.add(tf.math.scalar_mul(0.25, tf.cast(unrelated_count, dtype=tf.float32)), tf.cast(related_count, dtype=tf.float32))
+
+  # compute score
+  unrelated_pred = tf.cast(tf.equal(tf.cast(0, dtype=tf.int64), y_pred), dtype=tf.int64)
+  unrelated_true = tf.cast(tf.equal(tf.cast(0, dtype=tf.int64), y_true), dtype=tf.int64)
+  correct_unrelated_count = tf.math.reduce_sum(tf.cast(tf.equal(unrelated_pred, unrelated_true), dtype=tf.int64))
+  correct_unrelated_count_score = tf.math.scalar_mul(0.25, tf.cast(correct_unrelated_count, dtype=tf.float32))
+
+  is_related_mask = tf.not_equal(tf.cast(0, dtype=tf.int64), y_pred)
+  is_correct_mask = tf.equal(y_true, y_pred)
+
+  combined_mask_correct_related = tf.logical_and(is_related_mask, is_correct_mask)
+  correct_related_count = tf.math.reduce_sum(tf.cast(combined_mask_correct_related, dtype=tf.float32))
+  correct_related_count_score = tf.math.scalar_mul(1.0, correct_related_count)
+
+  is_related_true_mask = tf.not_equal(tf.cast(0, dtype=tf.int64), y_true)
+  combined_mask_related = tf.logical_and(is_related_mask, is_related_true_mask)
+  combined_mask_incorrect_related = tf.logical_and(combined_mask_related, tf.logical_not(combined_mask_correct_related))
+  incorrect_related_count = tf.math.reduce_sum(tf.cast(combined_mask_incorrect_related, dtype=tf.float32))
+  incorrect_related_count_score = tf.math.scalar_mul(0.25, incorrect_related_count)
+
+  score = tf.math.add_n([correct_unrelated_count_score, correct_related_count_score, incorrect_related_count_score])
+  return tf.math.divide(score, max_score)
+
+def build_model_fullyconnected():
+    """add pretrained bert model as a keras layer"""
+    input_word_ids = Input((MAX_SEQUENCE_LENGTH,), dtype=tf.int32, name='input_word_ids')
+    input_masks = Input((MAX_SEQUENCE_LENGTH,), dtype=tf.int32, name='input_masks')
+    input_segments = Input((MAX_SEQUENCE_LENGTH,), dtype=tf.int32, name='input_segments')
+    _, sout = bert_layer([input_word_ids, input_masks, input_segments])
+    X = GlobalAveragePooling1D()(sout)
+    X = Dense(784, activation='relu')(X) 
+    # X = Dense(784, activation='relu')(X) 
+    output_= Dense(4, activation='sigmoid', name='output')(X)
+
+    model = Model([input_word_ids, input_masks, input_segments],output_)
+    print(model.summary())
+
+    return model
+
+bert_path = {
+  "LARGE": "https://tfhub.dev/tensorflow/bert_en_uncased_L-12_H-768_A-12/1",
+  "SMALL": "https://tfhub.dev/google/small_bert/bert_uncased_L-4_H-256_A-4/1"
+}['SMALL']
+
+bert_layer = hub.KerasLayer(bert_path,trainable=True)
+vocab_file1 = bert_layer.resolved_object.vocab_file.asset_path.numpy()
+bert_tokenizer_tfhub = bert.bert_tokenization.FullTokenizer(vocab_file1, do_lower_case=True)
+
+x = Well('data/training_data.csv')
+x.fetch()
+x.input_cols = ['head', 'body']
+x.output_col = 'stance'
+
+x._df['tokens'] = [x.LazyCell(_get_inputs, (row, 128, bert_tokenizer_tfhub)) for index, row in x._df.iterrows()]
+x.lazy_cols = ['tokens']
+x.input_cols = ['tokens']
+x.output_cols = ['stance']
+x.input_cols
+
+model = build_model_fullyconnected(128)
+model.compile(optimizer = "adam", loss = 'categorical_crossentropy', metrics=[fnc_score])
+categories = sorted([_ for _ in x.df['stance'].unique()])
+
+for batch in x.chunkGenerator(chunk_size=1024, threads=False):
+    batch.input_cols = batch.expandColumn('tokens')
+    tokens_0 = batch.expandColumn('tokens_0')
+    tokens_1 = batch.expandColumn('tokens_1')
+    tokens_2 = batch.expandColumn('tokens_2')
+
+    training_y = batch._df[batch.splitCategoricalData('stance', expectedCategories=categories, useInts=True)]
+    
+    training_x = [
+        batch._df[tokens_0].to_numpy(),
+        batch._df[tokens_1].to_numpy(),
+        batch._df[tokens_2].to_numpy()
+    ]
+    model.fit(training_x, training_y)
+
+import pickle
+import io
+
+with io.open("BERT_MODEL.PICKLE", "wb") as handle:
+  pickle.dump(model, handle)

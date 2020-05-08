@@ -4,6 +4,7 @@ import time
 import io
 import os.path
 import pickle
+from threading import Thread
 import matplotlib.pyplot as plt
 
 try:
@@ -11,7 +12,7 @@ try:
 except ImportError:
     from well.exceptions import DryWellException
 
-from typing import Optional, Dict, Any, List, Union, Tuple
+from typing import Optional, Dict, Any, List, Union, Tuple, Callable
 
 from sklearn.model_selection import train_test_split
 
@@ -23,6 +24,28 @@ class UnivariateWell(object):
         Essentially maintains an internal pandas DF and returns useful modified copies
         in each of the properties.
     """
+
+    class LazyCell(object):
+        """
+            When certain values in the well take a long time to compute/use large
+            amounts of memory (e.g. tokenization), it's possible to place the 
+            operation into a "LazyCell," where the operation will not take place
+            until the cell is executed by the Well's `executeLazyCell()` method.
+        """
+
+        operation: Callable
+        args: Tuple[Any, ...]
+        kwargs: Dict[str, Any]
+
+        def __init__(self, operation: Callable, args: Tuple[Any, ...] = tuple(), kwargs: Dict[str, Any] = dict()):
+            self.operation = operation
+            self.args = args
+            self.kwargs = kwargs
+
+        def compute(self):
+            return self.operation(*self.args, **self.kwargs)
+
+
     name: str = 'base_well'
     version: float = 0.01
 
@@ -173,17 +196,41 @@ class UnivariateWell(object):
 
         return training_well, testing_well
 
-    def splitCategoricalData(self, columns: List[str], prefix: str = 'is_'):
+    def splitCategoricalData(
+        self, 
+        column: str, 
+        expectedCategories: List[str] = [],
+        prefix: str = 'is_', 
+        useInts: bool = False
+    ) -> List[str]:
         "Converts a categorical data column into multiple binary columns"
         if self._df is None:
             raise DryWellException()
-        for column in columns:
-            if column not in self.all_columns:
-                raise ValueError(f'Column "{column}" not in Well columns')
-            for category in self._df[column].unique():
-                self._df[f'{prefix}{column}_{category}'] = self._df[column] == category
 
-    def enumerateCategoricalData(self, columns: List[str], prefix: str = 'onehot') -> Dict[str, Dict[Any, int]]:
+        avail_columns = set()
+
+        for category in expectedCategories:
+            column_name = f'{prefix}{column}_{category}'
+            if useInts:
+                self._df[column_name] = 0
+            else:
+                self._df[column_name] = False
+            avail_columns.add(column_name)
+
+        if column not in self.all_columns:
+            raise ValueError(f'Column "{column}" not in Well columns')
+        for category in self._df[column].unique():
+            column_name = f'{prefix}{column}_{category}'
+            self._df[column_name] = self._df[column] == category
+
+            if useInts:
+                self._df[column_name] = self._df[column_name].astype(int)
+
+            avail_columns.add(column_name)
+
+        return list(avail_columns)
+
+    def enumerateCategoricalData(self, columns: List[str], prefix: str = 'numerical') -> Dict[str, Dict[Any, int]]:
         "Converts columns containing categorical data into one-hot encodings"
         if self._df is None:
             raise DryWellException()
@@ -298,7 +345,7 @@ class UnivariateWell(object):
             raise DryWellException()
 
         if useHead:
-            well._df = self._df.head(maxRows)
+            well._df = self._df.head(n=maxRows)
         else:
             well._df = self._df.sample(n=maxRows)
 
@@ -306,19 +353,66 @@ class UnivariateWell(object):
 
     def shuffle(self, reset_index: bool = False):
         "Shuffles the dataframe"
+        if self._df is None:
+            raise DryWellException()
 
-    def batchGenerator(self, batch_size: int = 32):
+        self._df = self._df.sample(frac=1)
+
+    def executeLazyColumns(self, start_index: int = 0 , end_index: int = -1, threads: bool = True) -> 'Well':
+        if end_index < 0:
+            end_index = len(self)
+
+        thread_pool: List[Thread] = []
+
+        def singleThreadTask(batch_df_, col_):
+            batch_df_[col_] = batch_df_.apply(lambda row: row[col_].compute(), axis=1)
+
+        transposed_df = self.df.T
+
+        batch_df = transposed_df[range(start_index, end_index)].T
+        for col in self._lazy_cols:
+            if col in batch_df.columns:
+                if threads:
+                    thread_pool.append(Thread(target=singleThreadTask, args=(batch_df, col)))
+                    thread_pool[-1].start()
+                else:
+                    batch_df[col] = batch_df.apply(lambda row: row[col].compute(), axis=1)
         
-        # Get batch_size elements at a time
-        # Populate the "_lazy_cols" upon generation
-        # yield a copy of the dataframe
+        if threads:
+            for thread in thread_pool:
+                thread.join()
 
-        def generator() -> pd.DataFrame:
-            start_index = 0
-            end_index = batch_size
-            # while start_index < :
-            #     yield None
+        well = self.copy()
+        well._df = batch_df
+        
+        return well
 
-        return generator
+    def chunkGenerator(self, chunk_size: int = 1024 * 20, threads: bool = True):
+        start_index = 0
+        end_index = chunk_size
+        while start_index < len(self):
+            yield self.executeLazyColumns(start_index, end_index, threads)
+            start_index, end_index = end_index, min(end_index + chunk_size, len(self))
+
+    def expandColumn(self, column: str) -> List[str]:
+        "Takes in a column of lists and expands it to multiple columns"
+        if self._df is None:
+            raise DryWellException()
+
+        expectedSize = len(self._df.reset_index()[column][0])
+
+        newColumns = {
+            f'{column}_{i}': [] for i in range(expectedSize)
+        }
+
+        for cell in self._df[column]:
+            for index, item in enumerate(cell):
+                newColumns[f'{column}_{index}'].append(item)
+    
+        for key, column in newColumns.items():
+            self._df[key] = column
+
+        return list(newColumns.keys())
+
 
 Well = UnivariateWell
