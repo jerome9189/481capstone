@@ -181,7 +181,6 @@ class UnivariateWell(object):
 
         return atlas
 
-
     def prune(self, saveColumns: List[str] = list()) -> List[str]:
         "Prunes the internal dataframe of this well"
         columns = self._df.columns
@@ -192,7 +191,6 @@ class UnivariateWell(object):
                 deleted_columns.append(column)
 
         return deleted_columns
-
 
     def fetch(self):
         if self._source.endswith('.csv'):

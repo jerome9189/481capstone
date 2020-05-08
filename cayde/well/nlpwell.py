@@ -8,11 +8,13 @@ import nltk
 from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk.stem import SnowballStemmer
 from sklearn.feature_extraction.text import TfidfVectorizer
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
-import bert
-from bert import run_classifier
-from bert import optimization
-from bert import tokenization
+# Disabled w/ tensorflow 2.0
+# import bert
+# from bert import run_classifier
+# from bert import optimization
+# from bert import tokenization
 
 import tensorflow as tf
 import tensorflow_hub as hub
@@ -99,6 +101,31 @@ class NLPWell(Well):
 
         return avail_columns
 
+    def createSentimentFeatures(self) -> List[str]:
+        # requires pre-tokenization
+        avail_columns = []
+        sid = SentimentIntensityAnalyzer()
+
+        def compute_sentiment(sentences):
+            result = []
+            for sentence in sentences:
+                vs = sid.polarity_scores(sentence)
+                result.append(vs)
+            return pd.DataFrame(result).mean()
+
+        for column in self._text_cols:
+            self._df[f'{column}'] = self._df.apply(lambda x: sent_tokenize(x)).apply(
+                lambda x: compute_sentiment(x), 
+                axis=1
+            )
+            # avail_columns = pd.concat([avail_columns, self.df[f'{column}'].apply(lambda x: sent_tokenize(x)).apply(
+            #     lambda x: compute_sentiment(x))], axis=1)
+            avail_columns.rename(columns={'compound': f'{column}_compound', 'neg': f'{column}_neg', 'neu': f'{column}_neu',
+                                          'pos': f'{column}_pos'}, inplace=True)
+
+            avail_columns.append(f'{column}')
+
+        return avail_columns #.values.tolist() ## note if desire list -> avail_columns.values.tolist()
 
     def createNgrams(self, highestNgram: int = 4, countUnique: bool = True, recordSize: bool = True, recordRatio: bool = True) -> List[str]:
         if highestNgram < 1:
@@ -190,77 +217,77 @@ class NLPWell(Well):
 
         return avail_columns
 
-    def _createCompareBERTEncodings(self, tokenizer: bert.tokenization.FullTokenizer):
+    # def _createCompareBERTEncodings(self, tokenizer: bert.tokenization.FullTokenizer):
 
-        if len(self._text_cols) != 2:
-            raise NLPWell.PreprocessingException(f"compareTextMode is true, and there are {len(self._text_cols)} text columns (expected 2)")
+    #     if len(self._text_cols) != 2:
+    #         raise NLPWell.PreprocessingException(f"compareTextMode is true, and there are {len(self._text_cols)} text columns (expected 2)")
 
-        newColumn = f'{self._text_cols[0]}_{self._text_cols[1]}_bert'
+    #     newColumn = f'{self._text_cols[0]}_{self._text_cols[1]}_bert'
 
-        primedInputs = self._df.apply(
-                lambda row: bert.run_classifier.InputExample(
-                guid=None, # Globally unique ID for bookkeeping, unused in this example
-                text_a=row[self._text_cols[0]],
-                text_b=row[self._text_cols[1]],
-                label=row[self._output_col]
-            ), 
-            axis=1
-        )
+    #     primedInputs = self._df.apply(
+    #             lambda row: bert.run_classifier.InputExample(
+    #             guid=None, # Globally unique ID for bookkeeping, unused in this example
+    #             text_a=row[self._text_cols[0]],
+    #             text_b=row[self._text_cols[1]],
+    #             label=row[self._output_col]
+    #         ), 
+    #         axis=1
+    #     )
 
-        self._df[newColumn] = bert.run_classifier.convert_examples_to_features(
-            primedInputs, 
-            list(self._df[self._output_col].unique()),
-            BERT_MAX_SEQ_LENGTH, 
-            tokenizer
-        )
+    #     self._df[newColumn] = bert.run_classifier.convert_examples_to_features(
+    #         primedInputs, 
+    #         list(self._df[self._output_col].unique()),
+    #         BERT_MAX_SEQ_LENGTH, 
+    #         tokenizer
+    #     )
 
-        return newColumn
+    #     return newColumn
 
-    def createBERTEncodings(self, 
-        autoAddColumns: bool = False,
-        compareTextMode: bool = False,
-    ) -> List[str]:
+    # def createBERTEncodings(self, 
+    #     autoAddColumns: bool = False,
+    #     compareTextMode: bool = False,
+    # ) -> List[str]:
         
-        # Cache the tokenizer for this instance
-        if self.__bert_tokenizer is None:
-            tokenizer = self.__bert_tokenizer = create_tokenizer_from_hub_module()
-        else:
-            tokenizer = self.__bert_tokenizer
+    #     # Cache the tokenizer for this instance
+    #     if self.__bert_tokenizer is None:
+    #         tokenizer = self.__bert_tokenizer = create_tokenizer_from_hub_module()
+    #     else:
+    #         tokenizer = self.__bert_tokenizer
 
-        avail_columns = []
+    #     avail_columns = []
 
-        if not compareTextMode:
+    #     if not compareTextMode:
             
-            for text_col in self._text_cols:
-                primedInputs = self._df.apply(
-                    lambda row: bert.run_classifier.InputExample(
-                        guid=None, # Globally unique ID for bookkeeping, unused in this example
-                        text_a=row[text_col], 
-                        label=row[self._output_col]
-                    ), 
-                    axis=1
-                )
+    #         for text_col in self._text_cols:
+    #             primedInputs = self._df.apply(
+    #                 lambda row: bert.run_classifier.InputExample(
+    #                     guid=None, # Globally unique ID for bookkeeping, unused in this example
+    #                     text_a=row[text_col], 
+    #                     label=row[self._output_col]
+    #                 ), 
+    #                 axis=1
+    #             )
 
-                self._df[f'{text_col}_bert'] = bert.run_classifier.convert_examples_to_features(
-                    primedInputs, 
-                    list(self._df[self._output_col].unique()),
-                    BERT_MAX_SEQ_LENGTH, 
-                    tokenizer
-                )
+    #             self._df[f'{text_col}_bert'] = bert.run_classifier.convert_examples_to_features(
+    #                 primedInputs, 
+    #                 list(self._df[self._output_col].unique()),
+    #                 BERT_MAX_SEQ_LENGTH, 
+    #                 tokenizer
+    #             )
 
-            avail_columns.append(f'{text_col}_bert')
+    #         avail_columns.append(f'{text_col}_bert')
 
-            return avail_columns
+    #         return avail_columns
 
-        newColumn = self._createCompareBERTEncodings(tokenizer)
-        avail_columns.append(newColumn)
-        return avail_columns
+    #     newColumn = self._createCompareBERTEncodings(tokenizer)
+    #     avail_columns.append(newColumn)
+    #     return avail_columns
 
 
 
 # Methods shown by Google Tensorflow Tutorials
 
-def create_tokenizer_from_hub_module() -> bert.tokenization.FullTokenizer:
+def create_tokenizer_from_hub_module(): # -> bert.tokenization.FullTokenizer:
     """Get the vocab file and casing info from the Hub module."""
     with tf.Graph().as_default():
         bert_module = hub.Module(BERT_MODEL_HUB)
