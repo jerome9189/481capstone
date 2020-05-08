@@ -32,6 +32,7 @@ class UnivariateWell(object):
 
     _input_cols: List[str]
     _output_col: Optional[str]
+    _lazy_cols: List[str]
     _feature_shape: Tuple[int, ...]
 
     @property
@@ -74,6 +75,21 @@ class UnivariateWell(object):
         if newColumn not in self._df:
             raise ValueError(f"{newColumn} not found in well")
         self._output_col = newColumn
+
+    @property
+    def lazy_cols(self) -> List[str]:
+        if self._df is None:
+            raise DryWellException()
+        return self._lazy_cols
+
+    @lazy_cols.setter
+    def lazy_cols(self, newColumns: List[str]):
+        if self._df is None:
+            raise DryWellException()
+        for column in newColumns:
+            if column not in self._df:
+                raise ValueError(f"{column} not found in well")
+        self._lazy_cols = newColumns[:]
 
     @property
     def all_columns(self) -> List[str]:
@@ -138,15 +154,21 @@ class UnivariateWell(object):
         self._last_retrieved = -1
         self._df = None
         self._input_cols = []
+        self._lazy_cols = []
         self._output_col = None
         self._source = source
         self._feature_shape = (1,)
 
+    def __len__(self):
+        if self._df is None:
+            return -1
+        return len(self._df)
+
     def splitTrainingTesting(self, testingRatio: float = 0.1) -> Tuple['Well', 'Well']:
         training_df, testing_df = train_test_split(self._df, test_size = testingRatio)
-        training_well = self.getToySample(0)
+        training_well = self.copy()
         training_well._df = training_df
-        testing_well = self.getToySample(0)
+        testing_well = self.copy()
         testing_well._df = testing_df
 
         return training_well, testing_well
@@ -183,6 +205,9 @@ class UnivariateWell(object):
 
     def prune(self, saveColumns: List[str] = list()) -> List[str]:
         "Prunes the internal dataframe of this well"
+        if self._df is None:
+            raise DryWellException()
+
         columns = self._df.columns
         deleted_columns: List[str] = []
         for column in columns:
@@ -215,6 +240,7 @@ class UnivariateWell(object):
                 'df': self._df,
                 'input_cols': self.input_cols,
                 'output_col': self.output_col,
+                'lazy_cols': self.lazy_cols,
                 'feature_shape': self._feature_shape
             }))
 
@@ -233,6 +259,7 @@ class UnivariateWell(object):
             self.input_cols = result['input_cols']
         if result['output_col'] is not None:
             self.output_col = result['output_col']
+        self._lazy_cols = result['lazy_cols']
         self._last_retrieved = result['last_retrieved']
         self._feature_shape = result['feature_shape']
 
@@ -249,20 +276,49 @@ class UnivariateWell(object):
     def describe(self):
         return self._df.describe()
 
-    def getToySample(self, maxRows: int = 20, useHead: bool = False) -> 'Well':
+    def copy(self) -> 'Well':
         well = self.__class__(self._source)
+
+        if self._df is not None:
+            well._df = self._df.copy()
+
+        well._last_retrieved = self._last_retrieved
+        well._input_cols = self._input_cols[:]
+        well._output_col = self._output_col
+        well._lazy_cols = self._lazy_cols[:]
+        well._source = self._source[:]
+        well._feature_shape = self._feature_shape
+
+        return well
+
+    def getToySample(self, maxRows: int = 20, useHead: bool = False) -> 'Well':
+        well = self.copy()
+
+        if self._df is None:
+            raise DryWellException()
 
         if useHead:
             well._df = self._df.head(maxRows)
         else:
             well._df = self._df.sample(n=maxRows)
 
-        well._last_retrieved = self._last_retrieved
-        well._input_cols = self._input_cols
-        well._output_col = self._output_col
-        well._source = self._source
-        well._feature_shape = self._feature_shape
-
         return well
+
+    def shuffle(self, reset_index: bool = False):
+        "Shuffles the dataframe"
+
+    def batchGenerator(self, batch_size: int = 32):
+        
+        # Get batch_size elements at a time
+        # Populate the "_lazy_cols" upon generation
+        # yield a copy of the dataframe
+
+        def generator() -> pd.DataFrame:
+            start_index = 0
+            end_index = batch_size
+            # while start_index < :
+            #     yield None
+
+        return generator
 
 Well = UnivariateWell
