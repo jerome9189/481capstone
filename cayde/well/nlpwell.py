@@ -16,6 +16,8 @@ import gensim
 from gensim import models
 from gensim import downloader
 
+import scipy
+
 import bert
 from bert import run_classifier
 from bert import optimization
@@ -171,104 +173,89 @@ class NLPWell(Well):
 
         return avail_columns
 
-    def createTfidfFeatures(self) -> List[str]:
+    def createSvdfFeatures(self) -> List[str]:
+        """Generates TF-IDF features for each text column in the well.
+            And a pairwise cosine similarity between the TF-IDF and SVD features of each
+            text column.
+
+            Outputs a list of columns modified."""
         avail_columns = []
 
+        # TODO: filter out stopwords or not? TF-IDF can work with both but one may be better. This one doesn't check for stopwords
+        # 1). concatenate all the text columns to get a list containing all the raw text in the dataset
+        all_text = []
+        for column in self.text_cols:
+            all_text.extend(list(self._df[f"{column}"]))
+
+        # 2). fit a TfidfVectorizer on the concatenated strings
+        # 3). sepatately transform ' '.join(Headline_unigram) and ' '.join(articleBody_unigram)
+        vec = TfidfVectorizer(ngram_range=(1, 3), max_df=0.8, min_df=2)
+        vec.fit(all_text)  # Tf-idf calculated on the combined training + test set
+        vocabulary = vec.vocabulary_
+
+        tf_idf_features = dict()
+        for column in self.text_cols:
+            # using the vocabulary found above, compute a TF-IDF vector for each text column
+            column_vectorizer = TfidfVectorizer(ngram_range=(1, 3), max_df=0.8, min_df=2, vocabulary=vocabulary)
+
+            # use ' '.join(Headline_unigram) instead of Headline since the former is already stemmed
+            tf_idf_features[f'{column}_tf_idf'] = column_vectorizer.fit_transform(self._df[f'{column}'])
+
+        # 4). compute cosine similarity between headline tfidf features and body tfidf features
+        for i in range(len(tf_idf_features.keys())):
+            for j in range(i, len(tf_idf_features.keys())):
+                if i != j:
+                    vec1_name = list(tf_idf_features.keys())[i]
+                    vec2_name = list(tf_idf_features.keys())[j]
+                    simTfidf = np.asarray(map(sklearn.metrics.pairwise.cosine_similarity,
+                                              tf_idf_features[vec1_name],
+                                              tf_idf_features[vec2_name]))
+
+                    self._df[f"{vec1_name}_cossim_{vec2_name}"] = simTfidf
+                    avail_columns.append(f"{vec1_name}_cossim_{vec2_name}")
+
+
+        # create truncated-svd features for each text column
+        svd_features = dict()
+        svd = sklearn.decomposition.TruncatedSVD(n_components=100, n_iter=15)
+
+        for column in self.text_cols:
+            # print(tf_idf_features[f"{column}_tf_idf"])
+            # all_values = list(tf_idf_features.values())
+            # all_values = list(map(np.array, all_values))
+            # all_values = np.hstack(tuple(all_values))
+
+            # The peculiar
+            svd.fit(tf_idf_features[f'{column}_tf_idf'])
+            # note that this turns a sparse matrix to an np array, which is expensive in terms of memory.
+            # For larger bodies of text, this will be a memory-intensive operation
+            svd_features[f'{column}_svd'] = svd.transform(tf_idf_features[f'{column}_tf_idf'].toarray())
+
+        # compute the cosine similarity between truncated-svd features
+        for i in range(len(svd_features.keys())):
+            for j in range(i, len(svd_features.keys())):
+                if i != j:
+                    vec1_name = list(svd_features.keys())[i]
+                    vec2_name = list(svd_features.keys())[j]
+                    simSvd = np.asarray(map(sklearn.metrics.pairwise.cosine_similarity,
+                                              svd_features[vec1_name],
+                                              svd_features[vec2_name]))
+
+                    self._df[f"{vec1_name}_cossim_{vec2_name}"] = simSvd
+                    avail_columns.append(f"{vec1_name}_cossim_{vec2_name}")
+
+        # add the SVD and TFIDF features to cayde
         for column in self._text_cols:
-            pass
+            self._df[f"{vec1_name}_cossim_{vec2_name}"] = simSvd
+            for i in range(tf_idf_features[f'{column}_tf_idf'].shape[1]):
+                avail_columns.append(f"{column}_tf_idf_{i}")
+                self._df[f"{column}_tf_idf_{i}"] = tf_idf_features[f'{column}_tf_idf'][:, i]
+
+            for i in range(svd_features[f'{column}_svd'].shape[1]):
+                avail_columns.append(f"{column}_svd_{i}")
+                self._df[f"{column}_svd_{i}"] = svd_features[f'{column}_svd'][:, i]
 
         return avail_columns
-
-    # def createSvdfFeatures(self) -> List[str]:
-    #     # avail_columns = []
-        #
-        # n_train = df[~df['target'].isnull()].shape[0]
-        # n_test = df[df['target'].isnull()].shape[0]
-        #
-        # # check to see if the TF-IDF features have been generated
-        # # if not, generate new ones
-        #
-        # tfidfGenerator = TfidfFeatureGenerator('tfidf')
-        # featuresTrain = tfidfGenerator.read('train')
-        # xHeadlineTfidfTrain, xBodyTfidfTrain = featuresTrain[0], featuresTrain[1]
-        #
-        # xHeadlineTfidf = xHeadlineTfidfTrain
-        # xBodyTfidf = xBodyTfidfTrain
-        # if n_test > 0:
-        #     # test set is available
-        #     featuresTest = tfidfGenerator.read('test')
-        #     xHeadlineTfidfTest, xBodyTfidfTest = featuresTest[0], featuresTest[1]
-        #     xHeadlineTfidf = vstack([xHeadlineTfidfTrain, xHeadlineTfidfTest])
-        #     xBodyTfidf = vstack([xBodyTfidfTrain, xBodyTfidfTest])
-        #
-        # # compute the cosine similarity between truncated-svd features
-        # svd = TruncatedSVD(n_components=50, n_iter=15)
-        # xHBTfidf = vstack([xHeadlineTfidf, xBodyTfidf])
-        # svd.fit(xHBTfidf)  # fit to the combined train-test set (or the full training set for cv process)
-        # xHeadlineSvd = svd.transform(xHeadlineTfidf)
-        #
-        # xHeadlineSvdTrain = xHeadlineSvd[:n_train, :]
-        # outfilename_hsvd_train = "train.headline.svd.pkl"
-        # with open(outfilename_hsvd_train, "wb") as outfile:
-        #     cPickle.dump(xHeadlineSvdTrain, outfile, -1)
-        # print
-        # 'headline svd features of training set saved in %s' % outfilename_hsvd_train
-        #
-        # if n_test > 0:
-        #     # test set is available
-        #     xHeadlineSvdTest = xHeadlineSvd[n_train:, :]
-        #     outfilename_hsvd_test = "test.headline.svd.pkl"
-        #     with open(outfilename_hsvd_test, "wb") as outfile:
-        #         cPickle.dump(xHeadlineSvdTest, outfile, -1)
-        #     print
-        #     'headline svd features of test set saved in %s' % outfilename_hsvd_test
-        #
-        # xBodySvd = svd.transform(xBodyTfidf)
-        # print
-        # 'xBodySvd.shape:'
-        # print
-        # xBodySvd.shape
-        #
-        # xBodySvdTrain = xBodySvd[:n_train, :]
-        # outfilename_bsvd_train = "train.body.svd.pkl"
-        # with open(outfilename_bsvd_train, "wb") as outfile:
-        #     cPickle.dump(xBodySvdTrain, outfile, -1)
-        # print
-        # 'body svd features of training set saved in %s' % outfilename_bsvd_train
-        #
-        # if n_test > 0:
-        #     # test set is available
-        #     xBodySvdTest = xBodySvd[n_train:, :]
-        #     outfilename_bsvd_test = "test.body.svd.pkl"
-        #     with open(outfilename_bsvd_test, "wb") as outfile:
-        #         cPickle.dump(xBodySvdTest, outfile, -1)
-        #     print
-        #     'body svd features of test set saved in %s' % outfilename_bsvd_test
-        #
-        # simSvd = np.asarray(map(cosine_sim, xHeadlineSvd, xBodySvd))[:, np.newaxis]
-        # print
-        # 'simSvd.shape:'
-        # print
-        # simSvd.shape
-        #
-        # simSvdTrain = simSvd[:n_train]
-        # outfilename_simsvd_train = "train.sim.svd.pkl"
-        # with open(outfilename_simsvd_train, "wb") as outfile:
-        #     cPickle.dump(simSvdTrain, outfile, -1)
-        #
-        # if n_test > 0:
-        #     # test set is available
-        #     simSvdTest = simSvd[n_train:]
-        #     outfilename_simsvd_test = "test.sim.svd.pkl"
-        #     with open(outfilename_simsvd_test, "wb") as outfile:
-        #         cPickle.dump(simSvdTest, outfile, -1)
-        #     print
-        #     'svd sim. features of test set saved in %s' % outfilename_simsvd_test
-        #
-        # for column in self._text_cols:
-        #     pass
-        #
-        # return avail_columns
 
     def createWord2VecFeatures(self, modelLocation, keepUnigrams=False) -> List[str]:
         avail_columns = []
@@ -314,7 +301,7 @@ class NLPWell(Well):
 
 
         return avail_columns
-    def createBERTEncodings(self, 
+    def createBERTEncodings(self,
         autoAddColumns: bool = False, 
         tokenizerModelHub: str = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1"
     ) -> List[str]:
