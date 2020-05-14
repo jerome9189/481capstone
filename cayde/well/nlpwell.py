@@ -262,12 +262,10 @@ class NLPWell(Well):
                     self._df[f"{vec1_name}_cossim_{vec2_name}"] = simSvd
                     avail_columns.append(f"{vec1_name}_cossim_{vec2_name}")
 
-        # add the SVD and TFIDF features to cayde
+        # add the SVD features to cayde
+        # the TF-IDF features are not saved because the matrices are just too big
         for column in self._text_cols:
             self._df[f"{vec1_name}_cossim_{vec2_name}"] = simSvd
-            for i in range(tf_idf_features[f'{column}_tf_idf'].shape[1]):
-                avail_columns.append(f"{column}_tf_idf_{i}")
-                self._df[f"{column}_tf_idf_{i}"] = tf_idf_features[f'{column}_tf_idf'][:, i]
 
             for i in range(svd_features[f'{column}_svd'].shape[1]):
                 avail_columns.append(f"{column}_svd_{i}")
