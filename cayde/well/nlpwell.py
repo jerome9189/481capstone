@@ -146,6 +146,27 @@ class NLPWell(Well):
 
         return avail_columns
 
+    def createSentimentFeatures(self) -> List[str]:
+        avail_columns = []
+        sid = SentimentIntensityAnalyzer()
+
+        def compute_sentiment(sentences):
+            result = []
+            for sentence in sentences:
+                vs = sid.polarity_scores(sentence)
+                result.append(vs)
+            return pd.DataFrame(result).mean()
+
+        for column in self._text_cols:
+            self._df = pd.concat([self._df, self._df[f'{column}'].apply(lambda x: sent_tokenize(x)).apply(
+                lambda x: compute_sentiment(x))], axis=1)
+            self._df.rename(
+                columns={'compound': f'{column}_compound', 'neg': f'{column}_neg', 'neu': f'{column}_neu',
+                         'pos': f'{column}_pos'}, inplace=True)
+            names = {f'{column}_compound', f'{column}_neg', f'{column}_neu', f'{column}_pos'}
+            for i in names:
+                avail_columns.append(i)
+            return avail_columns
 
     def createCountSentenceFeatures(self) -> List[str]:
         avail_columns = []
@@ -225,11 +246,8 @@ class NLPWell(Well):
             # all_values = list(map(np.array, all_values))
             # all_values = np.hstack(tuple(all_values))
 
-            # The peculiar
             svd.fit(tf_idf_features[f'{column}_tf_idf'])
-            # note that this turns a sparse matrix to an np array, which is expensive in terms of memory.
-            # For larger bodies of text, this will be a memory-intensive operation
-            svd_features[f'{column}_svd'] = svd.transform(tf_idf_features[f'{column}_tf_idf'].toarray())
+            svd_features[f'{column}_svd'] = svd.transform(tf_idf_features[f'{column}_tf_idf'])
 
         # compute the cosine similarity between truncated-svd features
         for i in range(len(svd_features.keys())):
