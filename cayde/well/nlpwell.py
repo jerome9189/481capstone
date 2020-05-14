@@ -246,11 +246,8 @@ class NLPWell(Well):
             # all_values = list(map(np.array, all_values))
             # all_values = np.hstack(tuple(all_values))
 
-            # The peculiar
             svd.fit(tf_idf_features[f'{column}_tf_idf'])
-            # note that this turns a sparse matrix to an np array, which is expensive in terms of memory.
-            # For larger bodies of text, this will be a memory-intensive operation
-            svd_features[f'{column}_svd'] = svd.transform(tf_idf_features[f'{column}_tf_idf'].toarray())
+            svd_features[f'{column}_svd'] = svd.transform(tf_idf_features[f'{column}_tf_idf'])
 
         # compute the cosine similarity between truncated-svd features
         for i in range(len(svd_features.keys())):
