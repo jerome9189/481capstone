@@ -71,7 +71,7 @@ def _get_inputs(row, _maxlen, tokenizer, use_keras_pad=False):
     #return sentences_converted,sentences_segment, sentences_mask
     #return [np.asarray(sentences_converted, dtype=np.int32), 
     #        np.asarray(sentences_segment, dtype=np.int32), 
-    #        np.asarray(sentences_mask, dtype=np.int32)]
+    #        np.asarray(sen tences_mask, dtype=np.int32)]
     return [np.array(tf.cast(sentences_converted,tf.int32))[0], np.array(tf.cast(sentences_segment,tf.int32))[0], np.array(tf.cast(sentences_mask,tf.int32))[0]]
 
 def fnc_score(y_true, y_pred):
@@ -125,7 +125,7 @@ def build_model_fullyconnected():
 bert_path = {
   "LARGE": "https://tfhub.dev/tensorflow/bert_en_uncased_L-12_H-768_A-12/1",
   "SMALL": "https://tfhub.dev/google/small_bert/bert_uncased_L-4_H-256_A-4/1"
-}['SMALL']
+}['LARGE']
 
 bert_layer = hub.KerasLayer(bert_path,trainable=True)
 vocab_file1 = bert_layer.resolved_object.vocab_file.asset_path.numpy()

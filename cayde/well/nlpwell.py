@@ -7,8 +7,17 @@ from typing import List
 import nltk
 from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk.stem import SnowballStemmer
+
+import sklearn
 from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from sklearn.preprocessing import normalize
+
+import gensim
+from gensim import models
+from gensim import downloader
+
+import scipy
 
 # Disabled w/ tensorflow 2.0
 # import bert
@@ -209,15 +218,139 @@ class NLPWell(Well):
 
         return avail_columns
 
-    def createTfidfFeatures(self) -> List[str]:
+    def createSvdfFeatures(self) -> List[str]:
+        """Generates TF-IDF features for each text column in the well.
+            And a pairwise cosine similarity between the TF-IDF and SVD features of each
+            text column.
+
+            Outputs a list of columns modified."""
         avail_columns = []
 
+        # TODO: filter out stopwords or not? TF-IDF can work with both but one may be better. This one doesn't check for stopwords
+        # 1). concatenate all the text columns to get a list containing all the raw text in the dataset
+        all_text = []
+        for column in self.text_cols:
+            all_text.extend(list(self._df[f"{column}"]))
+
+        # 2). fit a TfidfVectorizer on the concatenated strings
+        # 3). sepatately transform ' '.join(Headline_unigram) and ' '.join(articleBody_unigram)
+        vec = TfidfVectorizer(ngram_range=(1, 3), max_df=0.8, min_df=2)
+        vec.fit(all_text)  # Tf-idf calculated on the combined training + test set
+        vocabulary = vec.vocabulary_
+
+        tf_idf_features = dict()
+        for column in self.text_cols:
+            # using the vocabulary found above, compute a TF-IDF vector for each text column
+            column_vectorizer = TfidfVectorizer(ngram_range=(1, 3), max_df=0.8, min_df=2, vocabulary=vocabulary)
+
+            # use ' '.join(Headline_unigram) instead of Headline since the former is already stemmed
+            tf_idf_features[f'{column}_tf_idf'] = column_vectorizer.fit_transform(self._df[f'{column}'])
+
+        # 4). compute cosine similarity between headline tfidf features and body tfidf features
+        for i in range(len(tf_idf_features.keys())):
+            for j in range(i, len(tf_idf_features.keys())):
+                if i != j:
+                    vec1_name = list(tf_idf_features.keys())[i]
+                    vec2_name = list(tf_idf_features.keys())[j]
+                    simTfidf = np.asarray(map(sklearn.metrics.pairwise.cosine_similarity,
+                                              tf_idf_features[vec1_name],
+                                              tf_idf_features[vec2_name]))
+
+                    self._df[f"{vec1_name}_cossim_{vec2_name}"] = simTfidf
+                    avail_columns.append(f"{vec1_name}_cossim_{vec2_name}")
+
+
+        # create truncated-svd features for each text column
+        svd_features = dict()
+        svd = sklearn.decomposition.TruncatedSVD(n_components=100, n_iter=15)
+
+        for column in self.text_cols:
+            # print(tf_idf_features[f"{column}_tf_idf"])
+            # all_values = list(tf_idf_features.values())
+            # all_values = list(map(np.array, all_values))
+            # all_values = np.hstack(tuple(all_values))
+
+            # The peculiar
+            svd.fit(tf_idf_features[f'{column}_tf_idf'])
+            # note that this turns a sparse matrix to an np array, which is expensive in terms of memory.
+            # For larger bodies of text, this will be a memory-intensive operation
+            svd_features[f'{column}_svd'] = svd.transform(tf_idf_features[f'{column}_tf_idf'].toarray())
+
+        # compute the cosine similarity between truncated-svd features
+        for i in range(len(svd_features.keys())):
+            for j in range(i, len(svd_features.keys())):
+                if i != j:
+                    vec1_name = list(svd_features.keys())[i]
+                    vec2_name = list(svd_features.keys())[j]
+                    simSvd = np.asarray(map(sklearn.metrics.pairwise.cosine_similarity,
+                                              svd_features[vec1_name],
+                                              svd_features[vec2_name]))
+
+                    self._df[f"{vec1_name}_cossim_{vec2_name}"] = simSvd
+                    avail_columns.append(f"{vec1_name}_cossim_{vec2_name}")
+
+        # add the SVD and TFIDF features to cayde
         for column in self._text_cols:
-            pass
+            self._df[f"{vec1_name}_cossim_{vec2_name}"] = simSvd
+            for i in range(tf_idf_features[f'{column}_tf_idf'].shape[1]):
+                avail_columns.append(f"{column}_tf_idf_{i}")
+                self._df[f"{column}_tf_idf_{i}"] = tf_idf_features[f'{column}_tf_idf'][:, i]
+
+            for i in range(svd_features[f'{column}_svd'].shape[1]):
+                avail_columns.append(f"{column}_svd_{i}")
+                self._df[f"{column}_svd_{i}"] = svd_features[f'{column}_svd'][:, i]
 
         return avail_columns
 
-    # def _createCompareBERTEncodings(self, tokenizer: bert.tokenization.FullTokenizer):
+    def createWord2VecFeatures(self, modelLocation, keepUnigrams=False) -> List[str]:
+        avail_columns = []
+
+        model = gensim.models.KeyedVectors.load_word2vec_format(modelLocation, binary=True)
+
+        for column in self._text_cols:
+
+            if f"{column}_1gram" not in self._df.columns:
+                # use regex to split each text column into words (unigrams)
+                token_pattern = re.compile(r"(?u)\b\w\w+\b", flags=re.UNICODE)
+                tokens = [x.lower() for x in token_pattern.findall(column)]
+
+                if keepUnigrams:
+                    self._df[f"{column}_1gram"] = self._df[f"{column}"].map(lambda x: token_pattern.findall(x))
+                    unigrams = self._df[f"{column}_1gram"]
+                    avail_columns.append(f"{column}_1gram")
+                else:
+                    unigrams = self._df[f"{column}"].map(lambda x: token_pattern.findall(x))
+            else:
+                unigrams = self._df[f"{column}_1gram"]
+
+            # document vector built by adding together all the word vectors
+            # using Google's pre-trained word vectors
+            def word2Vec(word):
+                if word in model:
+                    return model[word]
+                else:
+                    return np.array([0.] * 300)
+
+            text_vec = unigrams.map(lambda x: list(map(word2Vec, x)))
+
+            # sum the words and normalize the vector
+            text_vec = text_vec.map(lambda x: sum(x))
+            text_vec = text_vec.map(lambda x: normalize(x.reshape(1, -1), axis=1))
+
+            for i in range(300):
+                # add a word2vec feature to the well
+                new_column = []
+                text_vec.apply(lambda x: new_column.append(x[0][i]))
+                self._df[f"{column}_word2vec_f{i}"] = new_column
+                avail_columns.append(f"{column}_word2vec_f{i}")
+
+
+        return avail_columns
+    def createBERTEncodings(self,
+        autoAddColumns: bool = False, 
+        tokenizerModelHub: str = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1"
+    ) -> List[str]:
+        avail_columns = []
 
     #     if len(self._text_cols) != 2:
     #         raise NLPWell.PreprocessingException(f"compareTextMode is true, and there are {len(self._text_cols)} text columns (expected 2)")

@@ -95,6 +95,8 @@ class UnivariateWell(object):
     def output_col(self, newColumn: str):
         if self._df is None:
             raise DryWellException()
+        if isinstance(newColumn, list):
+            raise ValueError("Well only supports one output column")
         if newColumn not in self._df:
             raise ValueError(f"{newColumn} not found in well")
         self._output_col = newColumn
