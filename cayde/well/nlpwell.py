@@ -146,6 +146,27 @@ class NLPWell(Well):
 
         return avail_columns
 
+    def createSentimentFeatures(self) -> List[str]:
+        avail_columns = []
+        sid = SentimentIntensityAnalyzer()
+
+        def compute_sentiment(sentences):
+            result = []
+            for sentence in sentences:
+                vs = sid.polarity_scores(sentence)
+                result.append(vs)
+            return pd.DataFrame(result).mean()
+
+        for column in self._text_cols:
+            self._df = pd.concat([self._df, self._df[f'{column}'].apply(lambda x: sent_tokenize(x)).apply(
+                lambda x: compute_sentiment(x))], axis=1)
+            self._df.rename(
+                columns={'compound': f'{column}_compound', 'neg': f'{column}_neg', 'neu': f'{column}_neu',
+                         'pos': f'{column}_pos'}, inplace=True)
+            names = {f'{column}_compound', f'{column}_neg', f'{column}_neu', f'{column}_pos'}
+            for i in names:
+                avail_columns.append(i)
+            return avail_columns
 
     def createCountSentenceFeatures(self) -> List[str]:
         avail_columns = []
