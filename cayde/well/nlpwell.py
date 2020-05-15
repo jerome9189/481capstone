@@ -7,6 +7,7 @@ from typing import List
 import nltk
 from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk.stem import SnowballStemmer
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 import sklearn
 from sklearn.feature_extraction.text import TfidfVectorizer
