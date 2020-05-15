@@ -167,7 +167,7 @@ class NLPWell(Well):
             names = {f'{column}_compound', f'{column}_neg', f'{column}_neu', f'{column}_pos'}
             for i in names:
                 avail_columns.append(i)
-            return avail_columns
+        return avail_columns
 
     def createCountSentenceFeatures(self) -> List[str]:
         avail_columns = []
